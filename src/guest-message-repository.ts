@@ -57,15 +57,13 @@ const SQLITE_CONSTRAINT_UNIQUE = 2067;
 export class GuestMessageRepository {
   readonly databasePath: string;
 
-  private readonly database: DatabaseSync;
+  private database: DatabaseSync | undefined;
   private readonly logger: GuestMessageRepositoryLogger;
   private initialized = false;
 
   constructor(options: GuestMessageRepositoryOptions) {
     this.databasePath = options.databasePath;
     this.logger = options.logger ?? console;
-    mkdirSync(dirname(options.databasePath), { recursive: true });
-    this.database = new DatabaseSync(options.databasePath);
   }
 
   initialize(): StoreGuestMessageResult | { ok: true } {
@@ -74,6 +72,8 @@ export class GuestMessageRepository {
     }
 
     try {
+      mkdirSync(dirname(this.databasePath), { recursive: true });
+      this.database = new DatabaseSync(this.databasePath);
       this.database.exec(`
         CREATE TABLE IF NOT EXISTS guest_messages (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,8 +102,13 @@ export class GuestMessageRepository {
       return initialized;
     }
 
+    const database = this.database;
+    if (database === undefined) {
+      return this.fail("insert", new Error("Guest message database is not initialized."));
+    }
+
     try {
-      this.database
+      database
         .prepare(
           `
             INSERT INTO guest_messages (
@@ -126,7 +131,7 @@ export class GuestMessageRepository {
           record.source.messageId ?? null
         );
 
-      const inserted = this.findByMessageKey(record.messageKey);
+      const inserted = this.findByMessageKey(database, record.messageKey);
       if (inserted === undefined) {
         return this.fail("insert", new Error("Inserted guest message could not be read back."));
       }
@@ -155,11 +160,16 @@ export class GuestMessageRepository {
       return initialized;
     }
 
+    const database = this.database;
+    if (database === undefined) {
+      return this.fail("list", new Error("Guest message database is not initialized."));
+    }
+
     const limit = normalizeLimit(options.limit);
     const offset = normalizeOffset(options.offset);
 
     try {
-      const rows = this.database
+      const rows = database
         .prepare(
           `
             SELECT
@@ -185,11 +195,13 @@ export class GuestMessageRepository {
   }
 
   close(): void {
-    this.database.close();
+    this.database?.close();
+    this.database = undefined;
+    this.initialized = false;
   }
 
-  private findByMessageKey(messageKey: string): GuestMessageRow | undefined {
-    const row = this.database
+  private findByMessageKey(database: DatabaseSync, messageKey: string): GuestMessageRow | undefined {
+    const row = database
       .prepare(
         `
           SELECT
