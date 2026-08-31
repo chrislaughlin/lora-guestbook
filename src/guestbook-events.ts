@@ -14,6 +14,7 @@ export interface GuestbookEventBrokerOptions {
 interface GuestbookEventClient {
   drainHandler: (() => void) | undefined;
   drainTimer: NodeJS.Timeout | undefined;
+  pending: string[];
 }
 
 export class GuestbookEventBroker {
@@ -55,7 +56,8 @@ export class GuestbookEventBroker {
     request.socket.setTimeout(0);
     this.clients.set(response, {
       drainHandler: undefined,
-      drainTimer: undefined
+      drainTimer: undefined,
+      pending: []
     });
 
     const remove = () => {
@@ -98,25 +100,37 @@ export class GuestbookEventBroker {
     }
 
     if (state.drainTimer !== undefined) {
-      this.closeLaggingClient(client);
+      state.pending.push(payload);
       return;
     }
 
-    try {
-      if (client.destroyed) {
-        this.removeClient(client);
-        return;
-      }
+    if (client.destroyed) {
+      this.removeClient(client);
+      return;
+    }
 
-      if (client.write(payload)) {
-        return;
-      }
+    let flushed: boolean;
+    try {
+      flushed = client.write(payload);
     } catch {
       this.closeLaggingClient(client);
       return;
     }
 
-    const drainHandler = () => {
+    if (flushed) {
+      return;
+    }
+
+    this.startDrainWatch(client);
+  }
+
+  private startDrainWatch(client: ServerResponse): void {
+    const state = this.clients.get(client);
+    if (state === undefined) {
+      return;
+    }
+
+    const flush = () => {
       const current = this.clients.get(client);
       if (current === undefined) {
         return;
@@ -127,15 +141,24 @@ export class GuestbookEventBroker {
       }
       current.drainTimer = undefined;
       current.drainHandler = undefined;
+
+      while (current.pending.length > 0 && current.drainTimer === undefined) {
+        const pendingPayload = current.pending[0] as string;
+        this.writeToClient(client, pendingPayload);
+        if (current.drainTimer !== undefined) {
+          break;
+        }
+        current.pending.shift();
+      }
     };
     const drainTimer = setTimeout(() => {
       this.closeLaggingClient(client);
     }, this.drainTimeoutMs);
     drainTimer.unref();
 
-    state.drainHandler = drainHandler;
+    state.drainHandler = flush;
     state.drainTimer = drainTimer;
-    client.once("drain", drainHandler);
+    client.once("drain", flush);
   }
 
   private removeClient(client: ServerResponse): void {

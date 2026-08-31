@@ -1,5 +1,6 @@
 import { once } from "node:events";
 import { createServer, type Server } from "node:http";
+import { createConnection } from "node:net";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -179,6 +180,25 @@ describe("guestbook API", () => {
     });
   });
 
+  it("returns 400 for a malformed request target without crashing", async () => {
+    const logger: GuestbookApiLogger = { error: vi.fn(() => undefined) };
+    const { baseUrl } = await startApi({ logger, repository: repositoryStub() });
+    const port = Number(new URL(baseUrl).port);
+
+    const rawResponse = await rawHttpRequest(port, "GET http://[ HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+
+    expect(rawResponse.statusLine).toContain("400");
+    expect(rawResponse.body).toContain("invalid_request_target");
+    expect(logger.error).toHaveBeenCalledWith(
+      "Guestbook API received an invalid request target.",
+      expect.objectContaining({ error: expect.any(String) })
+    );
+
+    const healthy = await fetch(`${baseUrl}/healthz`);
+    expect(healthy.status).toBe(200);
+    expect(await healthy.json()).toEqual({ ok: true, status: "live" });
+  });
+
   it("streams only future accepted guest-message events and cleans up disconnected clients", async () => {
     const broker = new GuestbookEventBroker();
     const { baseUrl } = await startApi({ broker, repository: repositoryStub() });
@@ -352,6 +372,59 @@ function decodeChunk(value: Uint8Array<ArrayBufferLike> | undefined): string {
 
 function clientCount(broker: GuestbookEventBroker): number {
   return (broker as unknown as { clients: Set<unknown> }).clients.size;
+}
+
+async function rawHttpRequest(port: number, raw: string): Promise<{ statusLine: string; body: string }> {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection({ host: "127.0.0.1", port });
+    let data = "";
+    let settled = false;
+    const finish = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      socket.destroy();
+      const firstLineEnd = data.indexOf("\r\n");
+      const cursor = firstLineEnd === -1 ? data.length : firstLineEnd + 2;
+      const headerEnd = data.indexOf("\r\n\r\n");
+      const bodyStart = headerEnd === -1 ? data.length : headerEnd + 4;
+      const rawBody = data.slice(bodyStart);
+      const headerBlock = data.slice(cursor, bodyStart);
+      const transferEncoding = /transfer-encoding:\s*chunked/i.test(headerBlock);
+      const body = transferEncoding ? stripChunkedEncoding(rawBody) : rawBody;
+      resolve({ statusLine: data.slice(0, firstLineEnd), body });
+    };
+    socket.on("connect", () => socket.write(raw));
+    socket.on("data", (chunk) => {
+      data += chunk.toString("utf8");
+      if (data.includes("\r\n\r\n") && !/transfer-encoding:\s*chunked/i.test(data)) {
+        finish();
+      }
+    });
+    socket.on("end", finish);
+    socket.on("close", finish);
+    socket.on("error", reject);
+    setTimeout(finish, 2000).unref();
+  });
+}
+
+function stripChunkedEncoding(body: string): string {
+  const lines: string[] = [];
+  let cursor = 0;
+  while (cursor < body.length) {
+    const lineEnd = body.indexOf("\r\n", cursor);
+    if (lineEnd === -1) {
+      break;
+    }
+    const size = Number.parseInt(body.slice(cursor, lineEnd), 16);
+    if (!Number.isFinite(size) || size <= 0) {
+      break;
+    }
+    lines.push(body.slice(lineEnd + 2, lineEnd + 2 + size));
+    cursor = lineEnd + 2 + size + 2;
+  }
+  return lines.join("");
 }
 
 async function waitFor(predicate: () => boolean): Promise<void> {

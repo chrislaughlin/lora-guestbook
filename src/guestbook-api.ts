@@ -80,8 +80,17 @@ async function handleRequest(
     Pick<GuestbookApiOptions, "allowedOrigin">
 ): Promise<void> {
   const method = request.method ?? "";
-  const url = parseRequestUrl(request);
-  const path = url.pathname;
+  const requestUrl = parseRequestUrl(request, options.logger);
+  if (requestUrl === undefined) {
+    writeJson(response, 400, {
+      error: {
+        code: "invalid_request_target",
+        message: "Request target is not a valid URL path."
+      }
+    });
+    return;
+  }
+  const path = requestUrl.pathname;
 
   if (method === "OPTIONS" && CORS_ROUTE_METHODS.has(path)) {
     if (!allowCorsPreflight(request, response, options.allowedOrigin)) {
@@ -139,7 +148,7 @@ async function handleRequest(
       return;
     }
 
-    const listed = options.repository.listGuestMessages(queryListOptions(url));
+    const listed = options.repository.listGuestMessages(queryListOptions(requestUrl));
 
     if (!listed.ok) {
       options.logger.error("Guest messages list failed.", {
@@ -179,8 +188,17 @@ async function handleRequest(
   });
 }
 
-function parseRequestUrl(request: IncomingMessage): URL {
-  return new URL(request.url ?? "/", "http://localhost");
+function parseRequestUrl(
+  request: IncomingMessage,
+  logger: GuestbookApiLogger
+): URL | undefined {
+  try {
+    return new URL(request.url ?? "/", "http://localhost");
+  } catch (cause) {
+    const error = cause instanceof Error ? cause : new Error(String(cause));
+    logger.error("Guestbook API received an invalid request target.", { error: error.message });
+    return undefined;
+  }
 }
 
 function queryNumber(url: URL, name: string): number | undefined {

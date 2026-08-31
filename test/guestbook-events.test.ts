@@ -35,6 +35,32 @@ describe("guestbook event broker", () => {
     expect(response.listenerCount("drain")).toBe(0);
   });
 
+  it("defers writes for backpressured clients until drain instead of destroying them", async () => {
+    const broker = new GuestbookEventBroker({ drainTimeoutMs: 60_000 });
+    const request = createRequestDouble();
+    const { chunks, destroy, response } = createResponseDouble([false, true, true]);
+
+    expect(broker.subscribe(request as unknown as IncomingMessage, response as unknown as ServerResponse, undefined)).toBe(
+      true
+    );
+    expect(chunks).toEqual([":\n\n"]);
+    expect(clientCount(broker)).toBe(1);
+
+    broker.publishAccepted(guestMessageRow());
+    broker.publishAccepted(guestMessageRow());
+
+    expect(destroy).not.toHaveBeenCalled();
+    expect(clientCount(broker)).toBe(1);
+    expect(chunks.filter((chunk) => chunk.includes("event: guest-message"))).toHaveLength(0);
+
+    response.emit("drain");
+
+    expect(destroy).not.toHaveBeenCalled();
+    expect(clientCount(broker)).toBe(1);
+    expect(chunks.filter((chunk) => chunk.includes("event: guest-message"))).toHaveLength(2);
+    expect(response.listenerCount("drain")).toBe(0);
+  });
+
   it("destroys backpressured SSE clients immediately during broker close", () => {
     const broker = new GuestbookEventBroker({ drainTimeoutMs: 60_000 });
     const request = createRequestDouble();
