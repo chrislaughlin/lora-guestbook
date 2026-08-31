@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { TextDecoder } from "node:util";
 import { z } from "zod";
 
 export const GUEST_NAME_MAX_LENGTH = 80;
@@ -52,12 +53,15 @@ type RejectedGuestMessageResult = Extract<ParseGuestMessageResult, { ok: false }
 
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u;
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9._:-]+$/u;
+const ISO_TIMESTAMP_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|[+-]\d{2}:\d{2})$/u;
+const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
 
 const normalizedText = (maxLength: number) =>
   z
     .string()
     .transform((value) => value.replace(/\s+/gu, " ").trim())
-    .pipe(z.string().min(1).max(maxLength));
+    .pipe(z.string().min(1).max(maxLength).refine((value) => !CONTROL_CHARACTER_PATTERN.test(value)));
 
 const optionalIdentifier = z.preprocess(
   (value) => (value === null ? undefined : value),
@@ -66,7 +70,7 @@ const optionalIdentifier = z.preprocess(
 
 const receivedAtSchema = z
   .string()
-  .refine((value) => !Number.isNaN(new Date(value).getTime()))
+  .refine(isStrictIsoTimestamp)
   .transform((value) => new Date(value).toISOString());
 
 const guestMessagePayloadSchema = z.object({
@@ -162,9 +166,15 @@ function decodePayload(input: string | Buffer | unknown): RejectedGuestMessageRe
   }
 
   if (Buffer.isBuffer(input)) {
-    const payload = input.toString("utf8");
-    if (payload.includes("\uFFFD") || CONTROL_CHARACTER_PATTERN.test(payload)) {
+    let payload: string;
+    try {
+      payload = utf8Decoder.decode(input);
+    } catch {
       return reject("invalid_encoding", undefined, "Payload must be valid UTF-8 text.");
+    }
+
+    if (CONTROL_CHARACTER_PATTERN.test(payload)) {
+      return reject("invalid_encoding", undefined, "Payload contains unsupported control characters.");
     }
 
     return { ok: true, payload };
@@ -194,6 +204,10 @@ function zodErrorToValidationError(
       return reject("empty_field", field, `${field} cannot be empty.`);
     }
 
+    if (CONTROL_CHARACTER_PATTERN.test(normalized)) {
+      return reject("invalid_encoding", field, `${field} contains unsupported control characters.`);
+    }
+
     return reject("field_too_long", field, `${field} is too long.`);
   }
 
@@ -208,6 +222,10 @@ function zodErrorToValidationError(
   if (field === "receivedAt") {
     if (!("receivedAt" in candidate) || candidate.receivedAt === undefined) {
       return reject("missing_field", "receivedAt", "receivedAt is required until the adapter supplies one.");
+    }
+
+    if (typeof candidate.receivedAt !== "string") {
+      return reject("malformed_payload", "receivedAt", "receivedAt must be a string.");
     }
 
     return reject("invalid_timestamp", "receivedAt", "receivedAt must be an ISO 8601 timestamp.");
@@ -233,6 +251,62 @@ function buildMessageKey(input: {
       });
 
   return createHash("sha256").update(identity).digest("hex");
+}
+
+function isStrictIsoTimestamp(value: string): boolean {
+  const match = ISO_TIMESTAMP_PATTERN.exec(value);
+  if (!match) {
+    return false;
+  }
+
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, millisecondText, offsetText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const millisecond = Number((millisecondText ?? "").padEnd(3, "0"));
+
+  if (
+    month < 1 ||
+    month > 12 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59 ||
+    millisecond > 999 ||
+    !isValidTimezoneOffset(offsetText)
+  ) {
+    return false;
+  }
+
+  const localDate = new Date(Date.UTC(year, month - 1, day, hour, minute, second, millisecond));
+  const hasValidCalendarDate =
+    localDate.getUTCFullYear() === year &&
+    localDate.getUTCMonth() === month - 1 &&
+    localDate.getUTCDate() === day &&
+    localDate.getUTCHours() === hour &&
+    localDate.getUTCMinutes() === minute &&
+    localDate.getUTCSeconds() === second &&
+    localDate.getUTCMilliseconds() === millisecond;
+
+  return hasValidCalendarDate && !Number.isNaN(new Date(value).getTime());
+}
+
+function isValidTimezoneOffset(offset: string | undefined): boolean {
+  if (offset === "Z") {
+    return true;
+  }
+
+  if (offset === undefined) {
+    return false;
+  }
+
+  const [hourText, minuteText] = offset.slice(1).split(":");
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+
+  return hour <= 23 && minute <= 59;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

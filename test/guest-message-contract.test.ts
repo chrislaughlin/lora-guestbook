@@ -91,6 +91,51 @@ describe("guest message contract", () => {
     });
   });
 
+  it("rejects unsupported control characters after JSON decoding", () => {
+    expect(parseGuestMessagePayload('{"name":"Null\\u0000Byte","message":"Hello","receivedAt":"2026-08-31T10:15:00Z"}')).toMatchObject({
+      ok: false,
+      error: {
+        category: "invalid_encoding",
+        field: "name"
+      }
+    });
+  });
+
+  it.each(["08/31/2026", "0", "2026-02-30T10:00:00Z", "2026-08-31T10:00:00"])(
+    "rejects non-strict ISO timestamp %s",
+    (receivedAt) => {
+      expect(
+        normalizeGuestMessage({
+          name: "Clock Check",
+          message: "Bad timestamp",
+          receivedAt
+        })
+      ).toMatchObject({
+        ok: false,
+        error: {
+          category: "invalid_timestamp",
+          field: "receivedAt"
+        }
+      });
+    }
+  );
+
+  it("reports a non-string receivedAt as malformed instead of missing", () => {
+    expect(
+      normalizeGuestMessage({
+        name: "Clock Check",
+        message: "Numeric timestamp",
+        receivedAt: 0
+      })
+    ).toMatchObject({
+      ok: false,
+      error: {
+        category: "malformed_payload",
+        field: "receivedAt"
+      }
+    });
+  });
+
   it("classifies repeated message identity as a duplicate", () => {
     const original = normalizeGuestMessage(readFixture("duplicate-original.json"));
     const repeat = normalizeGuestMessage(readFixture("duplicate-repeat.json"));
@@ -123,6 +168,31 @@ describe("guest message contract", () => {
         name: "Ada Lovelace",
         message: "Hello from the radio desk"
       }
+    });
+  });
+
+  it("accepts a valid replacement character from a UTF-8 buffer", () => {
+    const payload = Buffer.from(
+      JSON.stringify({
+        name: "Replacement",
+        message: "Valid replacement character \uFFFD",
+        receivedAt: "2026-08-31T10:15:00Z"
+      }),
+      "utf8"
+    );
+
+    expect(parseGuestMessagePayload(payload)).toMatchObject({
+      ok: true,
+      record: {
+        message: "Valid replacement character \uFFFD"
+      }
+    });
+  });
+
+  it("rejects malformed UTF-8 byte sequences from buffers", () => {
+    expect(parseGuestMessagePayload(Buffer.from([0xff]))).toMatchObject({
+      ok: false,
+      error: { category: "invalid_encoding" }
     });
   });
 });
