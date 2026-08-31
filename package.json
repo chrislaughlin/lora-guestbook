@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "lora-guestbook-ingest": "./dist/src/ingest-cli.js"
+  },
   "engines": {
     "node": ">=24.0.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "ingest:replay": "node dist/src/ingest-cli.js",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
