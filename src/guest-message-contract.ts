@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { z } from "zod";
 
 export const GUEST_NAME_MAX_LENGTH = 80;
 export const GUEST_MESSAGE_MAX_LENGTH = 500;
@@ -52,6 +53,32 @@ type RejectedGuestMessageResult = Extract<ParseGuestMessageResult, { ok: false }
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u;
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9._:-]+$/u;
 
+const normalizedText = (maxLength: number) =>
+  z
+    .string()
+    .transform((value) => value.replace(/\s+/gu, " ").trim())
+    .pipe(z.string().min(1).max(maxLength));
+
+const optionalIdentifier = z.preprocess(
+  (value) => (value === null ? undefined : value),
+  z.string().trim().min(1).max(IDENTIFIER_MAX_LENGTH).regex(IDENTIFIER_PATTERN).optional()
+);
+
+const receivedAtSchema = z
+  .string()
+  .refine((value) => !Number.isNaN(new Date(value).getTime()))
+  .transform((value) => new Date(value).toISOString());
+
+const guestMessagePayloadSchema = z.object({
+  name: normalizedText(GUEST_NAME_MAX_LENGTH),
+  message: normalizedText(GUEST_MESSAGE_MAX_LENGTH),
+  senderId: optionalIdentifier,
+  messageId: optionalIdentifier,
+  receivedAt: receivedAtSchema
+});
+
+type NormalizedGuestMessagePayload = z.infer<typeof guestMessagePayloadSchema>;
+
 export function parseGuestMessagePayload(
   input: string | Buffer | unknown,
   options: { receivedAt?: string } = {}
@@ -79,49 +106,29 @@ export function normalizeGuestMessage(
     return reject("malformed_payload", undefined, "Payload must be a JSON object.");
   }
 
-  const name = normalizeRequiredText(payload, "name", GUEST_NAME_MAX_LENGTH);
-  if (!name.ok) {
-    return name;
-  }
-
-  const message = normalizeRequiredText(payload, "message", GUEST_MESSAGE_MAX_LENGTH);
-  if (!message.ok) {
-    return message;
-  }
-
-  const senderId = normalizeOptionalIdentifier(payload, "senderId");
-  if (!senderId.ok) {
-    return senderId;
-  }
-
-  const messageId = normalizeOptionalIdentifier(payload, "messageId");
-  if (!messageId.ok) {
-    return messageId;
-  }
-
-  const receivedAtInput = payload.receivedAt ?? options.receivedAt;
-  const receivedAt = normalizeReceivedAt(receivedAtInput);
-  if (!receivedAt.ok) {
-    return receivedAt;
+  const candidate = { ...payload, receivedAt: payload.receivedAt ?? options.receivedAt };
+  const parsed = guestMessagePayloadSchema.safeParse(candidate);
+  if (!parsed.success) {
+    return zodErrorToValidationError(parsed.error, candidate);
   }
 
   const source = {
-    ...(senderId.value === undefined ? {} : { senderId: senderId.value }),
-    ...(messageId.value === undefined ? {} : { messageId: messageId.value })
+    ...(parsed.data.senderId === undefined ? {} : { senderId: parsed.data.senderId }),
+    ...(parsed.data.messageId === undefined ? {} : { messageId: parsed.data.messageId })
   };
 
   return {
     ok: true,
     record: {
-      name: name.value,
-      message: message.value,
+      name: parsed.data.name,
+      message: parsed.data.message,
       messageKey: buildMessageKey({
-        name: name.value,
-        message: message.value,
-        receivedAt: receivedAt.value,
+        name: parsed.data.name,
+        message: parsed.data.message,
+        receivedAt: parsed.data.receivedAt,
         ...source
       }),
-      receivedAt: receivedAt.value,
+      receivedAt: parsed.data.receivedAt,
       source
     }
   };
@@ -166,45 +173,31 @@ function decodePayload(input: string | Buffer | unknown): RejectedGuestMessageRe
   return reject("malformed_payload", undefined, "Payload must be a JSON string, UTF-8 buffer, or object.");
 }
 
-function normalizeRequiredText(
-  payload: Record<string, unknown>,
-  field: "name" | "message",
-  maxLength: number
-): RejectedGuestMessageResult | { ok: true; value: string } {
-  if (!(field in payload)) {
-    return reject("missing_field", field, `${field} is required.`);
+function zodErrorToValidationError(
+  error: z.ZodError<NormalizedGuestMessagePayload>,
+  candidate: Record<string, unknown>
+): RejectedGuestMessageResult {
+  const issue = error.issues[0];
+  const field = issue?.path[0] as keyof RawGuestMessagePayload | undefined;
+
+  if (field === "name" || field === "message") {
+    if (!(field in candidate) || candidate[field] === undefined) {
+      return reject("missing_field", field, `${field} is required.`);
+    }
+
+    if (typeof candidate[field] !== "string") {
+      return reject("malformed_payload", field, `${field} must be a string.`);
+    }
+
+    const normalized = candidate[field].replace(/\s+/gu, " ").trim();
+    if (normalized.length === 0) {
+      return reject("empty_field", field, `${field} cannot be empty.`);
+    }
+
+    return reject("field_too_long", field, `${field} is too long.`);
   }
 
-  if (typeof payload[field] !== "string") {
-    return reject("malformed_payload", field, `${field} must be a string.`);
-  }
-
-  const value = payload[field].replace(/\s+/gu, " ").trim();
-  if (value.length === 0) {
-    return reject("empty_field", field, `${field} cannot be empty.`);
-  }
-
-  if (value.length > maxLength) {
-    return reject("field_too_long", field, `${field} must be ${maxLength} characters or fewer.`);
-  }
-
-  return { ok: true, value };
-}
-
-function normalizeOptionalIdentifier(
-  payload: Record<string, unknown>,
-  field: "senderId" | "messageId"
-): RejectedGuestMessageResult | { ok: true; value?: string } {
-  if (!(field in payload) || payload[field] === undefined || payload[field] === null) {
-    return { ok: true };
-  }
-
-  if (typeof payload[field] !== "string") {
-    return reject("invalid_identifier", field, `${field} must be a string when present.`);
-  }
-
-  const value = payload[field].trim();
-  if (value.length === 0 || value.length > IDENTIFIER_MAX_LENGTH || !IDENTIFIER_PATTERN.test(value)) {
+  if (field === "senderId" || field === "messageId") {
     return reject(
       "invalid_identifier",
       field,
@@ -212,20 +205,15 @@ function normalizeOptionalIdentifier(
     );
   }
 
-  return { ok: true, value };
-}
+  if (field === "receivedAt") {
+    if (!("receivedAt" in candidate) || candidate.receivedAt === undefined) {
+      return reject("missing_field", "receivedAt", "receivedAt is required until the adapter supplies one.");
+    }
 
-function normalizeReceivedAt(input: unknown): RejectedGuestMessageResult | { ok: true; value: string } {
-  if (typeof input !== "string") {
-    return reject("missing_field", "receivedAt", "receivedAt is required until the adapter supplies one.");
-  }
-
-  const timestamp = new Date(input);
-  if (Number.isNaN(timestamp.getTime())) {
     return reject("invalid_timestamp", "receivedAt", "receivedAt must be an ISO 8601 timestamp.");
   }
 
-  return { ok: true, value: timestamp.toISOString() };
+  return reject("malformed_payload", undefined, issue?.message ?? "Payload failed schema validation.");
 }
 
 function buildMessageKey(input: {
