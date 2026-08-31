@@ -131,6 +131,59 @@ describe("guest message ingestion", () => {
     );
   });
 
+  it("calls onOutcome in processing order after persistence has classified each message", async () => {
+    const repository = openRepository();
+    const callbackStatuses: string[] = [];
+    const publishedRecords: string[] = [];
+
+    const result = await runGuestMessageIngestion(
+      sourceFromFixtures(["duplicate-original.json", "duplicate-repeat.json", "invalid-missing-message.json"]),
+      repository,
+      {
+        logger: quietLogger(),
+        onOutcome(outcome) {
+          callbackStatuses.push(outcome.status);
+          if (outcome.status === "accepted") {
+            publishedRecords.push(outcome.record.messageKey);
+          }
+        }
+      }
+    );
+
+    expect(result.outcomes.map((outcome) => outcome.status)).toEqual(["accepted", "duplicate", "invalid"]);
+    expect(callbackStatuses).toEqual(["accepted", "duplicate", "invalid"]);
+    expect(publishedRecords).toHaveLength(1);
+    expect(publishedRecords[0]).toMatch(/^[a-f0-9]{64}$/u);
+    repository.close();
+  });
+
+  it("swallows onOutcome callback errors and keeps ingesting later messages", async () => {
+    const repository = openRepository();
+    const logger = quietLogger();
+    const onOutcome = vi.fn(() => {
+      throw new Error("callback failed");
+    });
+
+    const result = await runGuestMessageIngestion(
+      sourceFromFixtures(["invalid-missing-message.json", "valid-basic.json"]),
+      repository,
+      { logger, onOutcome }
+    );
+
+    expect(result.outcomes.map((outcome) => outcome.status)).toEqual(["invalid", "accepted"]);
+    expect(result.summary).toMatchObject({ accepted: 1, invalid: 1 });
+    expect(onOutcome).toHaveBeenCalledTimes(2);
+    expect(logger.error).toHaveBeenCalledWith(
+      "Guest message ingestion outcome callback failed.",
+      expect.objectContaining({ status: "invalid", source: "replay", error: "callback failed" })
+    );
+    expect(logger.error).toHaveBeenCalledWith(
+      "Guest message ingestion outcome callback failed.",
+      expect.objectContaining({ status: "accepted", source: "replay", error: "callback failed" })
+    );
+    repository.close();
+  });
+
   it("returns a persistence failure outcome when startup initialization fails", async () => {
     const logger = quietLogger();
     const result = await runGuestMessageIngestion(sourceFromFixtures(["valid-basic.json"]), new InitializationFailingStore(), {
