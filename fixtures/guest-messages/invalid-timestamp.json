@@ -1,0 +1,7 @@
+{
+  "name": "Bad Clock",
+  "message": "The timestamp is wrong",
+  "senderId": "node-13",
+  "messageId": "packet-bad-clock",
+  "receivedAt": "not-a-date"
+}
