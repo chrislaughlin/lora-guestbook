@@ -10,6 +10,14 @@ Issue #1 defines the first stable boundary in the system: a protocol-independent
 - TypeScript exports: [src/guest-message-contract.ts](src/guest-message-contract.ts)
 - Representative fixtures: [fixtures/guest-messages](fixtures/guest-messages)
 
+## Persistence
+
+Issue #2 adds SQLite storage for accepted guest records. Application code should pass an explicit database file path when opening the repository. For the local MVP, use `data/guestbook.sqlite3`; the `data/` directory is ignored so local message data is not committed.
+
+Accepted records are inserted once by their stable `messageKey`. Duplicate inserts return a duplicate result instead of creating a second guestbook entry. Reads are bounded and ordered newest-first by `receivedAt`, with insertion order as a deterministic tie-breaker.
+
+For a simple local backup, stop the application and copy `data/guestbook.sqlite3` to a backup location. Restore by stopping the application and replacing the database file with the backup copy.
+
 ## Commands
 
 ```sh
