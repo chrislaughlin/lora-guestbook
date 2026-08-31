@@ -26,3 +26,5 @@ npm test
 npm run typecheck
 npm run build
 ```
+
+The SQLite repository uses Node's built-in `node:sqlite` module and requires Node.js 24 or newer.
