@@ -223,6 +223,38 @@ describe("guestbook API", () => {
     controller.abort();
     await waitFor(() => clientCount(broker) === 0);
   });
+
+  it("rejects excess SSE clients with a stable capacity error", async () => {
+    const broker = new GuestbookEventBroker({ maxClients: 1 });
+    const { baseUrl } = await startApi({ broker, repository: repositoryStub() });
+    const controller = new AbortController();
+
+    const first = await fetch(`${baseUrl}/api/guest-messages/events`, { signal: controller.signal });
+    expect(first.status).toBe(200);
+    expect(first.headers.get("content-type")).toBe("text/event-stream; charset=utf-8");
+
+    const reader = first.body?.getReader();
+    if (reader === undefined) {
+      throw new Error("Expected SSE response body.");
+    }
+    expect(await readStreamChunk(reader)).toBe(":\n\n");
+    expect(clientCount(broker)).toBe(1);
+
+    const rejected = await fetch(`${baseUrl}/api/guest-messages/events`);
+
+    expect(rejected.status).toBe(503);
+    expect(await rejected.json()).toEqual({
+      error: {
+        code: "sse_capacity_exceeded",
+        message: "Live update capacity is full."
+      }
+    });
+    expect(clientCount(broker)).toBe(1);
+
+    await expect(reader.cancel()).resolves.toBeUndefined();
+    controller.abort();
+    await waitFor(() => clientCount(broker) === 0);
+  });
 });
 
 interface RepositoryStubOptions {
