@@ -34,6 +34,29 @@ describe("guestbook event broker", () => {
     expect(clientCount(broker)).toBe(0);
     expect(response.listenerCount("drain")).toBe(0);
   });
+
+  it("destroys backpressured SSE clients immediately during broker close", () => {
+    const broker = new GuestbookEventBroker({ drainTimeoutMs: 60_000 });
+    const request = createRequestDouble();
+    const { chunks, destroy, response } = createResponseDouble([true, false]);
+
+    expect(broker.subscribe(request as unknown as IncomingMessage, response as unknown as ServerResponse, undefined)).toBe(
+      true
+    );
+    broker.publishAccepted(guestMessageRow());
+
+    expect(chunks.at(-1)).toContain("event: guest-message");
+    expect(response.listenerCount("drain")).toBe(1);
+    expect(clientCount(broker)).toBe(1);
+    expect(destroy).not.toHaveBeenCalled();
+
+    broker.close();
+
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(response.destroyed).toBe(true);
+    expect(clientCount(broker)).toBe(0);
+    expect(response.listenerCount("drain")).toBe(0);
+  });
 });
 
 interface RequestDouble extends EventEmitter {
