@@ -6,8 +6,10 @@ interface ServerCliOptions {
   allowedOrigin?: string;
   databasePath: string;
   host: string;
+  maxSseClients?: number;
   port: number;
   replayPaths: string[];
+  sseDrainTimeoutMs?: number;
 }
 
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
@@ -24,8 +26,10 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
     ...(options.allowedOrigin === undefined ? {} : { allowedOrigin: options.allowedOrigin }),
     databasePath: options.databasePath,
     host: options.host,
+    ...(options.maxSseClients === undefined ? {} : { maxSseClients: options.maxSseClients }),
     port: options.port,
-    replayPaths: options.replayPaths
+    replayPaths: options.replayPaths,
+    ...(options.sseDrainTimeoutMs === undefined ? {} : { sseDrainTimeoutMs: options.sseDrainTimeoutMs })
   });
 
   let shuttingDown = false;
@@ -79,6 +83,14 @@ export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = proc
   if (envAllowedOrigin !== undefined) {
     options.allowedOrigin = parseAllowedOrigin(envAllowedOrigin);
   }
+  const envMaxSseClients = env.GUESTBOOK_MAX_SSE_CLIENTS;
+  if (envMaxSseClients !== undefined) {
+    options.maxSseClients = parseNonNegativeInteger(envMaxSseClients, "GUESTBOOK_MAX_SSE_CLIENTS");
+  }
+  const envSseDrainTimeoutMs = env.GUESTBOOK_SSE_DRAIN_TIMEOUT_MS;
+  if (envSseDrainTimeoutMs !== undefined) {
+    options.sseDrainTimeoutMs = parseNonNegativeInteger(envSseDrainTimeoutMs, "GUESTBOOK_SSE_DRAIN_TIMEOUT_MS");
+  }
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -110,9 +122,23 @@ export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = proc
       continue;
     }
 
+    if (arg === "--max-sse-clients") {
+      const value = requiredValue(argv, index, "--max-sse-clients");
+      options.maxSseClients = parseNonNegativeInteger(value, "--max-sse-clients");
+      index += 1;
+      continue;
+    }
+
     if (arg === "--replay") {
       const value = requiredValue(argv, index, "--replay");
       options.replayPaths.push(value);
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--sse-drain-timeout-ms") {
+      const value = requiredValue(argv, index, "--sse-drain-timeout-ms");
+      options.sseDrainTimeoutMs = parseNonNegativeInteger(value, "--sse-drain-timeout-ms");
       index += 1;
       continue;
     }
@@ -155,6 +181,15 @@ function parseAllowedOrigin(value: string): string {
   }
 
   return value;
+}
+
+function parseNonNegativeInteger(value: string, label: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(`${label} must be a non-negative integer.`);
+  }
+
+  return parsed;
 }
 
 if (process.argv[1]?.endsWith("server-cli.js")) {

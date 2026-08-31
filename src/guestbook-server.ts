@@ -8,6 +8,8 @@ import { GuestbookEventBroker } from "./guestbook-events.js";
 
 export const DEFAULT_GUESTBOOK_HOST = "127.0.0.1";
 export const DEFAULT_GUESTBOOK_PORT = 3000;
+export const DEFAULT_HTTP_REQUEST_TIMEOUT_MS = 30_000;
+export const DEFAULT_HTTP_KEEP_ALIVE_TIMEOUT_MS = 5_000;
 
 export type GuestbookServerLogger = GuestMessageIngestionLogger;
 
@@ -16,8 +18,10 @@ export interface GuestbookServerOptions {
   databasePath?: string;
   host?: string;
   logger?: GuestbookServerLogger;
+  maxSseClients?: number;
   port?: number;
   replayPaths?: readonly string[];
+  sseDrainTimeoutMs?: number;
 }
 
 export interface GuestbookServer {
@@ -34,7 +38,10 @@ export function createGuestbookServer(options: GuestbookServerOptions = {}): Gue
     databasePath: options.databasePath ?? DEFAULT_GUESTBOOK_DATABASE_PATH,
     logger
   });
-  const broker = new GuestbookEventBroker();
+  const broker = new GuestbookEventBroker({
+    ...(options.maxSseClients === undefined ? {} : { maxClients: options.maxSseClients }),
+    ...(options.sseDrainTimeoutMs === undefined ? {} : { drainTimeoutMs: options.sseDrainTimeoutMs })
+  });
   const server = createServer(
     createGuestbookApi({
       ...(options.allowedOrigin === undefined ? {} : { allowedOrigin: options.allowedOrigin }),
@@ -43,6 +50,9 @@ export function createGuestbookServer(options: GuestbookServerOptions = {}): Gue
       repository
     })
   );
+  server.requestTimeout = DEFAULT_HTTP_REQUEST_TIMEOUT_MS;
+  server.headersTimeout = DEFAULT_HTTP_REQUEST_TIMEOUT_MS;
+  server.keepAliveTimeout = DEFAULT_HTTP_KEEP_ALIVE_TIMEOUT_MS;
 
   const host = options.host ?? DEFAULT_GUESTBOOK_HOST;
   const port = options.port ?? DEFAULT_GUESTBOOK_PORT;

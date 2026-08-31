@@ -33,6 +33,8 @@ Options:
 - `--host` or `GUESTBOOK_HOST`: bind host. Defaults to `127.0.0.1`.
 - `--port`, `PORT`, or `GUESTBOOK_PORT`: bind port. Defaults to `3000` and must be an integer from 1 to 65535.
 - `--allowed-origin` or `GUESTBOOK_ALLOWED_ORIGIN`: exact `http` or `https` origin with no path, query, or fragment.
+- `--max-sse-clients` or `GUESTBOOK_MAX_SSE_CLIENTS`: maximum active live update clients. Defaults to `100`.
+- `--sse-drain-timeout-ms` or `GUESTBOOK_SSE_DRAIN_TIMEOUT_MS`: milliseconds to allow a backpressured SSE client to drain before closing it. Defaults to `2000`.
 - `--replay`: optional replay file or directory. May be repeated. Without replay paths, the server runs API-only.
 
 ## Routes
@@ -111,6 +113,17 @@ Each event uses:
 - `event: guest-message`
 - `id`: the public message `id` as a string
 - `data`: a JSON `PublicGuestMessage`
+
+When live update capacity is full, the server rejects the subscription before opening the SSE stream:
+
+```json
+{
+  "error": {
+    "code": "sse_capacity_exceeded",
+    "message": "Live update capacity is full."
+  }
+}
+```
 
 ## CORS and errors
 

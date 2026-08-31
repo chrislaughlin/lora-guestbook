@@ -50,7 +50,7 @@ Replay input can be attached to the same server process. Accepted replay records
 npm run serve -- --database data/guestbook.sqlite3 --replay fixtures/guest-messages
 ```
 
-The server supports `GET /healthz`, `GET /readyz`, `GET /api/guest-messages`, and `GET /api/guest-messages/events`. Configure browser access with an exact origin such as `--allowed-origin http://localhost:5173` or `GUESTBOOK_ALLOWED_ORIGIN=http://localhost:5173`.
+The server supports `GET /healthz`, `GET /readyz`, `GET /api/guest-messages`, and `GET /api/guest-messages/events`. Configure browser access with an exact origin such as `--allowed-origin http://localhost:5173` or `GUESTBOOK_ALLOWED_ORIGIN=http://localhost:5173`. Live update streams are capped to protect the process; configure the cap with `--max-sse-clients` or `GUESTBOOK_MAX_SSE_CLIENTS`.
 
 ## Commands
 

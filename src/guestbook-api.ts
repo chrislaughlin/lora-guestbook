@@ -165,7 +165,9 @@ async function handleRequest(
       return;
     }
 
-    options.broker.subscribe(request, response, options.allowedOrigin);
+    if (!options.broker.subscribe(request, response, options.allowedOrigin)) {
+      writeJson(response, 503, sseCapacityExceeded());
+    }
     return;
   }
 
@@ -262,6 +264,15 @@ function originNotAllowed(): JsonError {
     error: {
       code: "origin_not_allowed",
       message: "Origin is not allowed."
+    }
+  };
+}
+
+function sseCapacityExceeded(): JsonError {
+  return {
+    error: {
+      code: "sse_capacity_exceeded",
+      message: "Live update capacity is full."
     }
   };
 }
