@@ -40,6 +40,7 @@ export type GuestMessageIngestionOutcome =
 
 export interface GuestMessageIngestionOptions {
   logger?: GuestMessageIngestionLogger;
+  onOutcome?: (outcome: GuestMessageIngestionOutcome) => void | Promise<void>;
   retryDelayMs?: number;
   maxTransportRetries?: number;
 }
@@ -61,6 +62,7 @@ export async function runGuestMessageIngestion(
   options: GuestMessageIngestionOptions = {}
 ): Promise<{ outcomes: GuestMessageIngestionOutcome[]; summary: GuestMessageIngestionSummary }> {
   const logger = options.logger ?? console;
+  const onOutcome = options.onOutcome;
   const retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
   const maxTransportRetries = options.maxTransportRetries ?? DEFAULT_MAX_TRANSPORT_RETRIES;
   const outcomes: GuestMessageIngestionOutcome[] = [];
@@ -75,6 +77,7 @@ export async function runGuestMessageIngestion(
       error: initialized.error
     };
     logOutcome(logger, outcome);
+    await notifyOutcome(logger, onOutcome, outcome);
     return { outcomes: [outcome], summary: summarize([outcome]) };
   }
 
@@ -90,6 +93,7 @@ export async function runGuestMessageIngestion(
       };
       outcomes.push(outcome);
       logOutcome(logger, outcome);
+      await notifyOutcome(logger, onOutcome, outcome);
 
       if (transportFailures >= maxTransportRetries) {
         break;
@@ -108,6 +112,7 @@ export async function runGuestMessageIngestion(
       const outcome: GuestMessageIngestionOutcome = { status: "invalid", source: source.name, error: parsed.error };
       outcomes.push(outcome);
       logOutcome(logger, outcome);
+      await notifyOutcome(logger, onOutcome, outcome);
       continue;
     }
 
@@ -121,6 +126,7 @@ export async function runGuestMessageIngestion(
       };
       outcomes.push(outcome);
       logOutcome(logger, outcome);
+      await notifyOutcome(logger, onOutcome, outcome);
       continue;
     }
 
@@ -133,6 +139,7 @@ export async function runGuestMessageIngestion(
       };
       outcomes.push(outcome);
       logOutcome(logger, outcome);
+      await notifyOutcome(logger, onOutcome, outcome);
       continue;
     }
 
@@ -144,6 +151,7 @@ export async function runGuestMessageIngestion(
     };
     outcomes.push(outcome);
     logOutcome(logger, outcome);
+    await notifyOutcome(logger, onOutcome, outcome);
   }
 
   return { outcomes, summary: summarize(outcomes) };
@@ -222,6 +230,27 @@ function logOutcome(logger: GuestMessageIngestionLogger, outcome: GuestMessageIn
         error: outcome.error.message
       });
       break;
+  }
+}
+
+async function notifyOutcome(
+  logger: GuestMessageIngestionLogger,
+  onOutcome: GuestMessageIngestionOptions["onOutcome"],
+  outcome: GuestMessageIngestionOutcome
+): Promise<void> {
+  if (onOutcome === undefined) {
+    return;
+  }
+
+  try {
+    await onOutcome(outcome);
+  } catch (cause) {
+    const error = cause instanceof Error ? cause : new Error(String(cause));
+    logger.error("Guest message ingestion outcome callback failed.", {
+      status: outcome.status,
+      source: outcome.source,
+      error: error.message
+    });
   }
 }
 

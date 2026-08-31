@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "bin": {
-    "lora-guestbook-ingest": "./dist/src/ingest-cli.js"
+    "lora-guestbook-ingest": "./dist/src/ingest-cli.js",
+    "lora-guestbook-server": "./dist/src/server-cli.js"
   },
   "engines": {
     "node": ">=24.0.0"
@@ -12,6 +13,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "ingest:replay": "node dist/src/ingest-cli.js",
+    "serve": "node dist/src/server-cli.js",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
