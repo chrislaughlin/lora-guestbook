@@ -72,9 +72,8 @@ export class GuestbookEventBroker {
   }
 
   close(): void {
-    for (const client of this.clients.keys()) {
-      this.removeClient(client);
-      client.end();
+    for (const client of [...this.clients.keys()]) {
+      this.closeLaggingClient(client);
     }
   }
 
