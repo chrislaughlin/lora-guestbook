@@ -18,6 +18,20 @@ Accepted records are inserted once by their stable `messageKey`. Duplicate inser
 
 For a simple local backup, stop the application and copy `data/guestbook.sqlite3` to a backup location. Restore by stopping the application and replacing the database file with the backup copy.
 
+## Ingestion
+
+Issue #3 adds a Node ingestion runner for turning radio payloads into durable guestbook rows. Hardware-specific LoRa transport remains behind the `RadioGuestMessageSource` interface; the checked-in CLI uses replay mode so local validation does not require a radio.
+
+Build the project, then replay one or more fixture files or a fixture directory:
+
+```sh
+npm run build
+npm run ingest:replay -- --database data/guestbook.sqlite3 --replay fixtures/guest-messages/valid-basic.json
+npm run ingest:replay -- --database data/guestbook.sqlite3 --replay fixtures/guest-messages
+```
+
+The ingestion runner classifies each payload as `accepted`, `invalid`, `duplicate`, `persistence_failed`, or `transport_failed`. Logs include structured status metadata and message keys where useful, but not the full guest message text by default. A database initialization failure exits non-zero so an operator can fix setup. A per-message insert failure is logged as `persistence_failed` and processing continues.
+
 ## Commands
 
 ```sh
