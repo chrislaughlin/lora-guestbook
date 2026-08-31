@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -133,23 +133,28 @@ describe("guest message repository", () => {
     repository.close();
   });
 
-  it("returns a structured failure and logs when a write fails", () => {
+  it("returns a structured failure and logs when database initialization fails", () => {
     const logger: GuestMessageRepositoryLogger = { error: vi.fn((..._data: unknown[]) => undefined) };
-    const repository = openRepository("guestbook.sqlite3", logger);
-    expect(repository.initialize()).toEqual({ ok: true });
-    repository.close();
+    const directory = mkdtempSync(join(tmpdir(), "guestbook-repository-"));
+    temporaryDirectories.push(directory);
+    const blockingFile = join(directory, "not-a-directory");
+    writeFileSync(blockingFile, "");
+    const repository = new GuestMessageRepository({
+      databasePath: join(blockingFile, "guestbook.sqlite3"),
+      logger
+    });
 
     const result = repository.insertAcceptedGuestMessage(guestMessage({ messageKey: "after-close" }));
 
     expect(result).toMatchObject({
       ok: false,
       status: "failed",
-      operation: "insert"
+      operation: "initialize"
     });
     expect(logger.error).toHaveBeenCalledWith(
       "Guest message repository operation failed.",
       expect.objectContaining({
-        operation: "insert",
+        operation: "initialize",
         error: expect.any(String)
       })
     );
