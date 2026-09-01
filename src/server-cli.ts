@@ -2,8 +2,11 @@
 import { DEFAULT_GUESTBOOK_DATABASE_PATH } from "./guest-message-repository.js";
 import { createGuestbookServer, DEFAULT_GUESTBOOK_HOST, DEFAULT_GUESTBOOK_PORT } from "./guestbook-server.js";
 
+export const DEFAULT_GUESTBOOK_CLIENT_DIR = "client/dist";
+
 interface ServerCliOptions {
   allowedOrigin?: string;
+  clientDir?: string;
   databasePath: string;
   host: string;
   maxSseClients?: number;
@@ -24,6 +27,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 
   const guestbook = createGuestbookServer({
     ...(options.allowedOrigin === undefined ? {} : { allowedOrigin: options.allowedOrigin }),
+    ...(options.clientDir === undefined ? {} : { clientDir: options.clientDir }),
     databasePath: options.databasePath,
     host: options.host,
     ...(options.maxSseClients === undefined ? {} : { maxSseClients: options.maxSseClients }),
@@ -73,6 +77,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 
 export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): ServerCliOptions {
   const options: ServerCliOptions = {
+    clientDir: env.GUESTBOOK_CLIENT_DIR ?? DEFAULT_GUESTBOOK_CLIENT_DIR,
     databasePath: env.GUESTBOOK_DATABASE_PATH ?? DEFAULT_GUESTBOOK_DATABASE_PATH,
     host: env.GUESTBOOK_HOST ?? DEFAULT_GUESTBOOK_HOST,
     port: parsePort(env.PORT ?? env.GUESTBOOK_PORT ?? String(DEFAULT_GUESTBOOK_PORT), "port"),
@@ -118,6 +123,13 @@ export function parseArgs(argv: readonly string[], env: NodeJS.ProcessEnv = proc
     if (arg === "--allowed-origin") {
       const value = requiredValue(argv, index, "--allowed-origin");
       options.allowedOrigin = parseAllowedOrigin(value);
+      index += 1;
+      continue;
+    }
+
+    if (arg === "--client-dir") {
+      const value = requiredValue(argv, index, "--client-dir");
+      options.clientDir = value;
       index += 1;
       continue;
     }

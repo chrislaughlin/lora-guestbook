@@ -52,6 +52,39 @@ npm run serve -- --database data/guestbook.sqlite3 --replay fixtures/guest-messa
 
 The server supports `GET /healthz`, `GET /readyz`, `GET /api/guest-messages`, and `GET /api/guest-messages/events`. Configure browser access with an exact origin such as `--allowed-origin http://localhost:5173` or `GUESTBOOK_ALLOWED_ORIGIN=http://localhost:5173`. Live update streams are capped to protect the process; configure the cap with `--max-sse-clients` or `GUESTBOOK_MAX_SSE_CLIENTS`.
 
+## Public guestbook UI
+
+Issue #5 adds an isolated Vite/React single-page app under `client/` that renders the public guestbook and streams new entries live over Server-Sent Events. It is view-only; public message submission is intentionally out of scope.
+
+Build the client, then the server serves the built SPA same-origin:
+
+```sh
+cd client
+npm install
+npm run build
+cd ..
+npm run build
+npm run serve -- --database data/guestbook.sqlite3
+```
+
+Now serving the SPA is on by default. Control the static directory with `--client-dir <path>` or `GUESTBOOK_CLIENT_DIR`; it defaults to `client/dist`. The backend routes (`/api/*`, `/healthz`, `/readyz`) are always handled by the API regardless of the client directory. API-only usage is preserved: if you no longer want static serving, point `--client-dir` at an empty directory or remove the built assets.
+
+### Development workflow
+
+Run the backend and the Vite dev server side by side:
+
+```sh
+npm run serve -- --database data/guestbook.sqlite3
+cd client
+npm run dev
+```
+
+Vite dev server proxies `/api` (including `/api/guest-messages/events`) to `http://localhost:3000`, so the React app talks to the backend without CORS configuration during development.
+
+### Live updates and reconnection
+
+New accepted entries appear automatically without a page refresh via SSE. The client dedupes by message id so a live event that overlaps the initial fetch (or a refresh) never renders twice. If the stream drops, the client reconnects automatically; on reconnect it re-fetches the latest list and merges the records published during the gap, again deduplicating by id.
+
 ## Commands
 
 ```sh
