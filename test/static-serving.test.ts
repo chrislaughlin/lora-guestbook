@@ -89,12 +89,88 @@ describe("static file and API serving", () => {
         `GET ${target} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n`
       );
       expect(malformed.statusLine).toContain("404");
+      // Sane structured error with no internal decode error or raw target echoed back.
+      expect(JSON.parse(malformed.body)).toEqual({
+        error: {
+          code: "not_found",
+          message: "Resource not found."
+        }
+      });
+      expect(malformed.body).not.toContain("URIError");
+      expect(malformed.body).not.toContain("URI malformed");
     }
 
     // The server process must survive the malformed requests.
     const indexResponse = await fetch(`${baseUrl}/`);
     expect(indexResponse.status).toBe(200);
     expect(indexResponse.headers.get("content-type")).toBe("text/html; charset=utf-8");
+  });
+
+  it("handles HEAD on malformed and valid static targets without crashing or leaking a body", async () => {
+    const { baseUrl } = await startComposedServer();
+
+    const malformedHead = await rawHttpRequest(
+      baseUrl,
+      "HEAD /%zz/ HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    );
+    expect(malformedHead.statusLine).toContain("404");
+    expect(malformedHead.body).toBe("");
+
+    const validHead = await rawHttpRequest(
+      baseUrl,
+      "HEAD /assets/app.js HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    );
+    expect(validHead.statusLine).toContain("200");
+    expect(validHead.body).toBe("");
+
+    const indexResponse = await fetch(`${baseUrl}/`);
+    expect(indexResponse.status).toBe(200);
+    expect(indexResponse.headers.get("content-type")).toBe("text/html; charset=utf-8");
+  });
+
+  it("keeps malformed percent-encoding off the API routes and returns sane static 404s", async () => {
+    const { baseUrl } = await startComposedServer();
+
+    for (const target of ["/api/guest-messages/%zz", "/healthz/%zz", "/%c0/api/guest-messages"]) {
+      const malformed = await rawHttpRequest(
+        baseUrl,
+        `GET ${target} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n`
+      );
+      expect(malformed.statusLine).toContain("404");
+      expect(JSON.parse(malformed.body)).toEqual({
+        error: {
+          code: "not_found",
+          message: "Resource not found."
+        }
+      });
+      expect(malformed.body).not.toContain("URIError");
+    }
+
+    const indexResponse = await fetch(`${baseUrl}/`);
+    expect(indexResponse.status).toBe(200);
+  });
+
+  it("returns a sane 400 for an invalid absolute-form target on the composed server and stays alive", async () => {
+    const { baseUrl } = await startComposedServer();
+
+    const invalid = await rawHttpRequest(
+      baseUrl,
+      "GET http://[ HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    );
+    expect(invalid.statusLine).toContain("400");
+    expect(JSON.parse(invalid.body)).toEqual({
+      error: {
+        code: "invalid_request_target",
+        message: "Request target is not a valid URL path."
+      }
+    });
+    // The internal URL parse error must not be echoed to the client.
+    expect(invalid.body).not.toContain("Invalid URL");
+    expect(invalid.body).not.toContain("URIError");
+
+    const health = await fetch(`${baseUrl}/healthz`);
+    expect(health.status).toBe(200);
+    expect(await health.json()).toEqual({ ok: true, status: "live" });
   });
 
   it("keeps /healthz and /readyz reachable", async () => {
@@ -197,18 +273,36 @@ async function rawHttpRequest(baseUrl: string, raw: string): Promise<{ statusLin
       socket.destroy();
       const headerEnd = data.indexOf("\r\n\r\n");
       const bodyStart = headerEnd === -1 ? data.length : headerEnd + 4;
-      resolve({ statusLine: data.split("\r\n")[0] ?? "", body: data.slice(bodyStart) });
+      const headerBlock = headerEnd === -1 ? data : data.slice(0, headerEnd);
+      const transferEncoding = /transfer-encoding:\s*chunked/i.test(headerBlock);
+      const body = transferEncoding ? stripChunkedEncoding(data.slice(bodyStart)) : data.slice(bodyStart);
+      resolve({ statusLine: data.split("\r\n")[0] ?? "", body });
     };
     socket.on("connect", () => socket.write(raw));
     socket.on("data", (chunk) => {
       data += chunk.toString("utf8");
-      if (data.includes("\r\n\r\n")) {
-        finish();
-      }
     });
     socket.on("end", finish);
     socket.on("close", finish);
     socket.on("error", reject);
     setTimeout(finish, 2000).unref();
   });
+}
+
+function stripChunkedEncoding(body: string): string {
+  const chunks: string[] = [];
+  let cursor = 0;
+  while (cursor < body.length) {
+    const lineEnd = body.indexOf("\r\n", cursor);
+    if (lineEnd === -1) {
+      break;
+    }
+    const size = Number.parseInt(body.slice(cursor, lineEnd), 16);
+    if (!Number.isFinite(size) || size <= 0) {
+      break;
+    }
+    chunks.push(body.slice(lineEnd + 2, lineEnd + 2 + size));
+    cursor = lineEnd + 2 + size + 2;
+  }
+  return chunks.join("");
 }
