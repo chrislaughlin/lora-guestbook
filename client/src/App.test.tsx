@@ -239,4 +239,96 @@ describe("App", () => {
     expect(document.querySelector("b")).toBeNull();
     expect(document.querySelector("img")).toBeNull();
   });
+
+  it("surfaces a recoverable reconnect state when the live stream drops and restores live on reconnect", async () => {
+    vi.stubGlobal("fetch", fetchOk(messagesFixture));
+
+    render(<App />);
+    await screen.findByText("Ada Lovelace");
+
+    const source = MockEventSource.instances[0];
+    if (source === undefined) {
+      throw new Error("Expected an EventSource instance.");
+    }
+    source.emitOpen();
+    await screen.findByText("● Live");
+
+    // Stream becomes unavailable: reconnect state is surfaced to the user.
+    source.emitError();
+    await screen.findByText(/Reconnecting…/);
+    expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
+
+    // EventSource auto-reconnects: live state is restored without affecting entries.
+    source.emitOpen();
+    await screen.findByText("● Live");
+    expect(within(screen.getByRole("list")).getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("re-fetches and merges without duplicates when the stream reconnects", async () => {
+    const liveKatherine: PublicGuestMessage = {
+      id: 3,
+      name: "Katherine Johnson",
+      message: "Live and counting",
+      receivedAt: "2026-08-31T10:16:00.000Z",
+      storedAt: "2026-08-31T10:16:01.000Z"
+    };
+    let includeLiveRecord = false;
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return {
+          messages: includeLiveRecord
+            ? [liveKatherine, ...messagesFixture]
+            : messagesFixture
+        };
+      }
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await screen.findByText("Ada Lovelace");
+
+    const source = MockEventSource.instances[0];
+    if (source === undefined) {
+      throw new Error("Expected an EventSource instance.");
+    }
+    source.emitOpen();
+
+    // A live entry arrives while connected and is only present once.
+    source.emitMessage(liveKatherine);
+    await screen.findByText("Katherine Johnson");
+
+    // The stream drops and, meanwhile, the entry is persisted server-side.
+    includeLiveRecord = true;
+    source.emitError();
+    await screen.findByText(/Reconnecting…/);
+
+    // Reconnect triggers a re-fetch + merge; the overlapping id must not duplicate.
+    source.emitOpen();
+
+    await waitFor(() => {
+      const list = screen.getByRole("list");
+      const entries = within(list).getAllByRole("listitem");
+      expect(entries).toHaveLength(3);
+      expect(within(list).getAllByText("Katherine Johnson")).toHaveLength(1);
+      expect(within(list).getAllByText("Ada Lovelace")).toHaveLength(1);
+      expect(entries[0]).toHaveTextContent("Katherine Johnson");
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the Retry button keyboard-reachable in the error state", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
+
+    render(<App />);
+    await screen.findByRole("alert");
+
+    const retry = screen.getByRole("button", { name: "Retry" });
+    // A native button, so it is a real interactive control in the default tab order.
+    expect(retry.tagName).toBe("BUTTON");
+    expect(retry.tabIndex).toBe(0);
+    retry.focus();
+    expect(retry).toHaveFocus();
+  });
 });
