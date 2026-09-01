@@ -56,7 +56,9 @@ export function useGuestMessages(
         byId.set(message.id, message);
       }
     }
-    return [...byId.values()].sort((a, b) => b.id - a.id);
+    return [...byId.values()].sort(
+      (a, b) => b.receivedAt.localeCompare(a.receivedAt) || b.id - a.id
+    );
   };
 
   const reconcileRef = useRef<() => Promise<void>>(async () => {});
@@ -110,7 +112,9 @@ export function useGuestMessages(
             if (current.some((message) => message.id === parsed.id)) {
               return current;
             }
-            return [parsed, ...current].sort((a, b) => b.id - a.id);
+            return [parsed, ...current].sort(
+              (a, b) => b.receivedAt.localeCompare(a.receivedAt) || b.id - a.id
+            );
           });
           setReady(true);
           setErrorMessage(null);
