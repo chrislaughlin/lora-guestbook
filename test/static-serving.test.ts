@@ -80,6 +80,23 @@ describe("static file and API serving", () => {
     expect(nullByte.statusLine).toContain("404");
   });
 
+  it("does not crash on malformed percent-encoding and keeps serving afterwards", async () => {
+    const { baseUrl } = await startComposedServer();
+
+    for (const target of ["/%zz/", "/%c0%ae%c0%ae/", "/%c0/", "/%"]) {
+      const malformed = await rawHttpRequest(
+        baseUrl,
+        `GET ${target} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n`
+      );
+      expect(malformed.statusLine).toContain("404");
+    }
+
+    // The server process must survive the malformed requests.
+    const indexResponse = await fetch(`${baseUrl}/`);
+    expect(indexResponse.status).toBe(200);
+    expect(indexResponse.headers.get("content-type")).toBe("text/html; charset=utf-8");
+  });
+
   it("keeps /healthz and /readyz reachable", async () => {
     const { baseUrl } = await startComposedServer();
 

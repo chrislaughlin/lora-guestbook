@@ -123,7 +123,14 @@ function resolvePathWithinRoot(rootDir: string, pathname: string): string | unde
     return undefined;
   }
 
-  const decoded = decodeURIComponent(pathname);
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    // Malformed percent-encoding (e.g. "%zz", "%c0") — treat as unresolvable.
+    return undefined;
+  }
+
   if (decoded.includes("\u0000") || decoded.includes("..")) {
     return undefined;
   }

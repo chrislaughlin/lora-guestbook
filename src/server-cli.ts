@@ -58,6 +58,13 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
 
+  // Keep the process alive if any fire-and-forget request handler rejects; a
+  // single unhandled rejection must never terminate the server.
+  process.on("unhandledRejection", (reason: unknown) => {
+    const error = reason instanceof Error ? reason : new Error(String(reason));
+    console.error("Unhandled promise rejection.", { error: error.message });
+  });
+
   try {
     await guestbook.start();
     console.info("Guestbook server listening.", {
