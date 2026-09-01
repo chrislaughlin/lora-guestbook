@@ -148,6 +148,45 @@ describe("App", () => {
     expect(entries[1]).toHaveTextContent("Grace Hopper");
   });
 
+  it("renders newest-first by receivedAt even when id order does not correlate (late-arriving older id renders below newer receivedAt)", async () => {
+    // id and receivedAt orders diverge: the highest id (3) has the OLDEST
+    // receivedAt. An id-only sort would wrongly place it on top (CQ-1); the
+    // documented server comparator must sort by receivedAt new, then id as a
+    // tie-breaker, so the older record renders below the newer ones.
+    const diverging: PublicGuestMessage[] = [
+      {
+        id: 1,
+        name: "Middle entry",
+        message: "Received second",
+        receivedAt: "2026-08-31T10:15:00.000Z",
+        storedAt: "2026-08-31T10:15:01.000Z"
+      },
+      {
+        id: 3,
+        name: "Late-arriving older packet",
+        message: "Oldest on the wire but highest id",
+        receivedAt: "2026-08-31T10:14:00.000Z",
+        storedAt: "2026-08-31T10:14:01.000Z"
+      },
+      {
+        id: 2,
+        name: "Newest entry",
+        message: "Received first, newest receivedAt",
+        receivedAt: "2026-08-31T10:16:00.000Z",
+        storedAt: "2026-08-31T10:16:01.000Z"
+      }
+    ];
+    vi.stubGlobal("fetch", fetchOk(diverging));
+
+    render(<App />);
+    const list = await screen.findByRole("list");
+    const entries = within(list).getAllByRole("listitem");
+    expect(entries).toHaveLength(3);
+    expect(entries[0]).toHaveTextContent("Newest entry");
+    expect(entries[1]).toHaveTextContent("Middle entry");
+    expect(entries[2]).toHaveTextContent("Late-arriving older packet");
+  });
+
   it("shows an error state with a Retry button on fetch failure", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 500, json: async () => ({}) })));
 
