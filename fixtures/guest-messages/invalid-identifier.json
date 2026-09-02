@@ -1,7 +1,0 @@
-{
-  "name": "Bad Identifier",
-  "message": "The sender contains spaces",
-  "senderId": "node with spaces",
-  "messageId": "packet-bad-id",
-  "receivedAt": "2026-08-31T10:55:00.000Z"
-}

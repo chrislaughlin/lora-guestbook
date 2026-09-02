@@ -1,7 +1,0 @@
-{
-  "name": "Katherine Johnson",
-  "message": "Same message twice",
-  "senderId": "node-9",
-  "messageId": "packet-duplicate",
-  "receivedAt": "2026-08-31T10:30:00.000Z"
-}
