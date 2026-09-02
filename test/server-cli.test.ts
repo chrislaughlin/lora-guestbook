@@ -3,11 +3,12 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_GUESTBOOK_DATABASE_PATH } from "../src/guest-message-repository.js";
 import { DEFAULT_MAX_SSE_CLIENTS, DEFAULT_SSE_DRAIN_TIMEOUT_MS } from "../src/guestbook-events.js";
 import { DEFAULT_GUESTBOOK_HOST, DEFAULT_GUESTBOOK_PORT } from "../src/guestbook-server.js";
-import { parseArgs } from "../src/server-cli.js";
+import { DEFAULT_GUESTBOOK_CLIENT_DIR, parseArgs } from "../src/server-cli.js";
 
 describe("guestbook server CLI config", () => {
   it("uses stable defaults without CORS by default", () => {
     expect(parseArgs([], {})).toEqual({
+      clientDir: DEFAULT_GUESTBOOK_CLIENT_DIR,
       databasePath: DEFAULT_GUESTBOOK_DATABASE_PATH,
       host: DEFAULT_GUESTBOOK_HOST,
       port: DEFAULT_GUESTBOOK_PORT,
@@ -43,6 +44,7 @@ describe("guestbook server CLI config", () => {
       )
     ).toEqual({
       allowedOrigin: "https://guestbook.example",
+      clientDir: DEFAULT_GUESTBOOK_CLIENT_DIR,
       databasePath: "data/env.sqlite3",
       host: "0.0.0.0",
       maxSseClients: 12,
@@ -59,6 +61,7 @@ describe("guestbook server CLI config", () => {
         GUESTBOOK_SSE_DRAIN_TIMEOUT_MS: "250"
       })
     ).toEqual({
+      clientDir: DEFAULT_GUESTBOOK_CLIENT_DIR,
       databasePath: DEFAULT_GUESTBOOK_DATABASE_PATH,
       host: DEFAULT_GUESTBOOK_HOST,
       maxSseClients: 3,

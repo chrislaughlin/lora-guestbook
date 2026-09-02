@@ -1,10 +1,11 @@
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
 import { DEFAULT_GUESTBOOK_DATABASE_PATH, GuestMessageRepository } from "./guest-message-repository.js";
 import { runGuestMessageIngestion, type GuestMessageIngestionLogger } from "./guest-message-ingestion.js";
 import { ReplayGuestMessageSource } from "./replay-guest-message-source.js";
 import { createGuestbookApi } from "./guestbook-api.js";
 import { GuestbookEventBroker } from "./guestbook-events.js";
+import { createStaticFileHandler } from "./static-file-server.js";
 
 export const DEFAULT_GUESTBOOK_HOST = "127.0.0.1";
 export const DEFAULT_GUESTBOOK_PORT = 3000;
@@ -15,6 +16,7 @@ export type GuestbookServerLogger = GuestMessageIngestionLogger;
 
 export interface GuestbookServerOptions {
   allowedOrigin?: string;
+  clientDir?: string;
   databasePath?: string;
   host?: string;
   logger?: GuestbookServerLogger;
@@ -42,14 +44,20 @@ export function createGuestbookServer(options: GuestbookServerOptions = {}): Gue
     ...(options.maxSseClients === undefined ? {} : { maxClients: options.maxSseClients }),
     ...(options.sseDrainTimeoutMs === undefined ? {} : { drainTimeoutMs: options.sseDrainTimeoutMs })
   });
-  const server = createServer(
-    createGuestbookApi({
-      ...(options.allowedOrigin === undefined ? {} : { allowedOrigin: options.allowedOrigin }),
-      broker,
-      logger,
-      repository
-    })
-  );
+  const apiHandler = createGuestbookApi({
+    ...(options.allowedOrigin === undefined ? {} : { allowedOrigin: options.allowedOrigin }),
+    broker,
+    logger,
+    repository
+  });
+
+  let requestHandler: (request: IncomingMessage, response: ServerResponse) => void = apiHandler;
+  if (options.clientDir !== undefined) {
+    const staticHandler = createStaticFileHandler({ rootDir: options.clientDir });
+    requestHandler = composeApiAndStatic(apiHandler, staticHandler);
+  }
+
+  const server = createServer(requestHandler);
   server.requestTimeout = DEFAULT_HTTP_REQUEST_TIMEOUT_MS;
   server.headersTimeout = DEFAULT_HTTP_REQUEST_TIMEOUT_MS;
   server.keepAliveTimeout = DEFAULT_HTTP_KEEP_ALIVE_TIMEOUT_MS;
@@ -77,6 +85,53 @@ export function createGuestbookServer(options: GuestbookServerOptions = {}): Gue
       repository.close();
     }
   };
+}
+
+type RequestHandler = (request: IncomingMessage, response: ServerResponse) => void;
+
+const API_ROUTE_PATHS = new Set<string>([
+  "/api/guest-messages",
+  "/api/guest-messages/events",
+  "/healthz",
+  "/readyz"
+]);
+
+function composeApiAndStatic(apiHandler: RequestHandler, staticHandler: RequestHandler): RequestHandler {
+  return (request, response) => {
+    const method = request.method ?? "";
+    let url: URL;
+    try {
+      url = new URL(request.url ?? "/", "http://localhost");
+    } catch {
+      apiHandler(request, response);
+      return;
+    }
+
+    if (API_ROUTE_PATHS.has(url.pathname)) {
+      apiHandler(request, response);
+      return;
+    }
+
+    if (method !== "GET" && method !== "HEAD") {
+      writeStaticMethodNotAllowed(response);
+      return;
+    }
+
+    staticHandler(request, response);
+  };
+}
+
+function writeStaticMethodNotAllowed(response: ServerResponse): void {
+  response.setHeader("content-type", "application/json; charset=utf-8");
+  response.writeHead(405);
+  response.end(
+    `${JSON.stringify({
+      error: {
+        code: "method_not_allowed",
+        message: "Method is not allowed."
+      }
+    })}\n`
+  );
 }
 
 async function runReplayIngestion(
