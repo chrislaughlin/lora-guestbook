@@ -89,12 +89,14 @@ export function createGuestbookServer(options: GuestbookServerOptions = {}): Gue
 
 type RequestHandler = (request: IncomingMessage, response: ServerResponse) => void;
 
-const API_ROUTE_PATHS = new Set<string>([
-  "/api/guest-messages",
-  "/api/guest-messages/events",
-  "/healthz",
-  "/readyz"
-]);
+function isApiPath(pathname: string): boolean {
+  return (
+    pathname === "/api" ||
+    pathname.startsWith("/api/") ||
+    pathname === "/healthz" ||
+    pathname === "/readyz"
+  );
+}
 
 function composeApiAndStatic(apiHandler: RequestHandler, staticHandler: RequestHandler): RequestHandler {
   return (request, response) => {
@@ -107,7 +109,7 @@ function composeApiAndStatic(apiHandler: RequestHandler, staticHandler: RequestH
       return;
     }
 
-    if (API_ROUTE_PATHS.has(url.pathname)) {
+    if (isApiPath(url.pathname)) {
       apiHandler(request, response);
       return;
     }

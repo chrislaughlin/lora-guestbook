@@ -45,6 +45,7 @@ export function useGuestMessages(
   const eventSourceRef = useRef<GuestMessageEventSource | null>(null);
   const createEventSourceRef = useRef(createEventSource);
   createEventSourceRef.current = createEventSource;
+  const loadedOnceRef = useRef(false);
 
   const mergeAndSort = (current: PublicGuestMessage[], incoming: PublicGuestMessage[]) => {
     const byId = new Map<number, PublicGuestMessage>();
@@ -74,11 +75,14 @@ export function useGuestMessages(
       }
       const fetched = body.messages.filter(isPublicGuestMessage);
       setMessages((current) => mergeAndSort(current, fetched));
+      loadedOnceRef.current = true;
       setReady(true);
       setErrorMessage(null);
     } catch {
       setErrorMessage("Could not load guestbook messages.");
-      setReady(false);
+      if (!loadedOnceRef.current) {
+        setReady(false);
+      }
     }
   };
   reconcileRef.current = reconcile;
@@ -92,7 +96,6 @@ export function useGuestMessages(
   useEffect(() => {
     let disposed = false;
     let source: GuestMessageEventSource | null = null;
-    let wasConnectedBefore = false;
 
     const openEvents = () => {
       if (disposed) {
@@ -116,6 +119,7 @@ export function useGuestMessages(
               (a, b) => b.receivedAt.localeCompare(a.receivedAt) || b.id - a.id
             );
           });
+          loadedOnceRef.current = true;
           setReady(true);
           setErrorMessage(null);
         } catch {
@@ -127,12 +131,12 @@ export function useGuestMessages(
         if (disposed) {
           return;
         }
-        if (wasConnectedBefore) {
-          // We were connected, dropped, and reconnected. Re-fetch and merge
-          // to recover any records published during the disconnect gap.
-          void reconcileRef.current();
-        }
-        wasConnectedBefore = true;
+        // Reconcile on every open: the first open re-fetches after the
+        // client is subscribed server-side (closing the window where an
+        // accepted message would otherwise be missed by both the initial
+        // list snapshot and the stream), and later opens re-fetch to recover
+        // records published during a disconnect gap.
+        void reconcileRef.current();
         setLiveConnected(true);
       });
 
@@ -149,9 +153,8 @@ export function useGuestMessages(
       source = es;
     };
 
-    void reconcileRef.current().then(() => {
-      openEvents();
-    });
+    openEvents();
+    void reconcileRef.current();
 
     return () => {
       disposed = true;
