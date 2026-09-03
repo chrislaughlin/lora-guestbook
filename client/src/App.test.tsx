@@ -123,17 +123,17 @@ describe("App", () => {
     );
 
     render(<App />);
-    expect(screen.getByText("Loading guestbook…")).toBeInTheDocument();
+    expect(screen.getByText("Loading guestbook...")).toBeInTheDocument();
 
     resolveFetch({ ok: true, status: 200, json: async () => ({ messages: [] }) });
-    await waitFor(() => expect(screen.queryByText("Loading guestbook…")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("Loading guestbook...")).not.toBeInTheDocument());
   });
 
   it("shows a clear empty state when there are no entries", async () => {
     vi.stubGlobal("fetch", fetchOk([]));
 
     render(<App />);
-    await screen.findByText("No guestbook messages yet. Check back soon – new entries appear live.");
+    await screen.findByText("No guestbook messages yet. New entries appear live.");
     expect(screen.queryByRole("list")).not.toBeInTheDocument();
   });
 
@@ -144,8 +144,9 @@ describe("App", () => {
     const list = await screen.findByRole("list");
     const entries = within(list).getAllByRole("listitem");
     expect(entries).toHaveLength(2);
-    expect(entries[0]).toHaveTextContent("Ada Lovelace");
-    expect(entries[1]).toHaveTextContent("Grace Hopper");
+    expect(entries[0]).toHaveTextContent("@AdaLovelace");
+    expect(entries[0]).toHaveTextContent("10:15 UTC");
+    expect(entries[1]).toHaveTextContent("@GraceHopper");
   });
 
   it("renders newest-first by receivedAt even when id order does not correlate (late-arriving older id renders below newer receivedAt)", async () => {
@@ -182,9 +183,9 @@ describe("App", () => {
     const list = await screen.findByRole("list");
     const entries = within(list).getAllByRole("listitem");
     expect(entries).toHaveLength(3);
-    expect(entries[0]).toHaveTextContent("Newest entry");
-    expect(entries[1]).toHaveTextContent("Middle entry");
-    expect(entries[2]).toHaveTextContent("Late-arriving older packet");
+    expect(entries[0]).toHaveTextContent("@Newestentry");
+    expect(entries[1]).toHaveTextContent("@Middleentry");
+    expect(entries[2]).toHaveTextContent("@Latearrivingolderpacket");
   });
 
   it("shows an error state with a Retry button on fetch failure", async () => {
@@ -210,14 +211,14 @@ describe("App", () => {
 
     shouldFail = false;
     screen.getByRole("button", { name: "Retry" }).click();
-    await screen.findByText("Ada Lovelace");
+    await screen.findByText("@AdaLovelace");
   });
 
   it("adds exactly one new entry from a live SSE event without full refresh", async () => {
     vi.stubGlobal("fetch", fetchOk(messagesFixture));
 
     render(<App />);
-    await screen.findByText("Ada Lovelace");
+    await screen.findByText("@AdaLovelace");
 
     const source = MockEventSource.instances[0];
     if (source === undefined) {
@@ -232,17 +233,17 @@ describe("App", () => {
       storedAt: "2026-08-31T10:16:01.000Z"
     });
 
-    await screen.findByText("Katherine Johnson");
+    await screen.findByText("@KatherineJohnson");
     const list = await screen.findByRole("list");
     expect(within(list).getAllByRole("listitem")).toHaveLength(3);
-    expect(within(list).getAllByText("Katherine Johnson")).toHaveLength(1);
+    expect(within(list).getAllByText("@KatherineJohnson")).toHaveLength(1);
   });
 
   it("does not duplicate an entry whose id overlaps the initial list", async () => {
     vi.stubGlobal("fetch", fetchOk(messagesFixture));
 
     render(<App />);
-    await screen.findByText("Ada Lovelace");
+    await screen.findByText("@AdaLovelace");
 
     const source = MockEventSource.instances[0];
     if (source === undefined) {
@@ -254,7 +255,7 @@ describe("App", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     const list = await screen.findByRole("list");
     expect(within(list).getAllByRole("listitem")).toHaveLength(2);
-    expect(within(list).getAllByText("Ada Lovelace")).toHaveLength(1);
+    expect(within(list).getAllByText("@AdaLovelace")).toHaveLength(1);
   });
 
   it("renders HTML-like content as escaped literal text (no element injected)", async () => {
@@ -272,7 +273,7 @@ describe("App", () => {
     render(<App />);
     await screen.findByRole("list");
 
-    expect(screen.getByText(/<script>/)).toBeInTheDocument();
+    expect(screen.getByText(/scriptwindowpwnedtruescript/)).toBeInTheDocument();
     expect(screen.getByText(/<b>bold<\/b>/)).toBeInTheDocument();
     expect(document.querySelector("script")).toBeNull();
     expect(document.querySelector("b")).toBeNull();
@@ -283,23 +284,23 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchOk(messagesFixture));
 
     render(<App />);
-    await screen.findByText("Ada Lovelace");
+    await screen.findByText("@AdaLovelace");
 
     const source = MockEventSource.instances[0];
     if (source === undefined) {
       throw new Error("Expected an EventSource instance.");
     }
     source.emitOpen();
-    await screen.findByText("● Live");
+    await screen.findByText("Live");
 
     // Stream becomes unavailable: reconnect state is surfaced to the user.
     source.emitError();
-    await screen.findByText(/Reconnecting…/);
-    expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
+    await screen.findByText(/Reconnecting.../);
+    expect(screen.getByText("@AdaLovelace")).toBeInTheDocument();
 
     // EventSource auto-reconnects: live state is restored without affecting entries.
     source.emitOpen();
-    await screen.findByText("● Live");
+    await screen.findByText("Live");
     expect(within(screen.getByRole("list")).getAllByRole("listitem")).toHaveLength(2);
   });
 
@@ -326,7 +327,7 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    await screen.findByText("Ada Lovelace");
+    await screen.findByText("@AdaLovelace");
 
     const source = MockEventSource.instances[0];
     if (source === undefined) {
@@ -336,12 +337,12 @@ describe("App", () => {
 
     // A live entry arrives while connected and is only present once.
     source.emitMessage(liveKatherine);
-    await screen.findByText("Katherine Johnson");
+    await screen.findByText("@KatherineJohnson");
 
     // The stream drops and, meanwhile, the entry is persisted server-side.
     includeLiveRecord = true;
     source.emitError();
-    await screen.findByText(/Reconnecting…/);
+    await screen.findByText(/Reconnecting.../);
 
     // Reconnect triggers a re-fetch + merge; the overlapping id must not duplicate.
     source.emitOpen();
@@ -350,9 +351,9 @@ describe("App", () => {
       const list = screen.getByRole("list");
       const entries = within(list).getAllByRole("listitem");
       expect(entries).toHaveLength(3);
-      expect(within(list).getAllByText("Katherine Johnson")).toHaveLength(1);
-      expect(within(list).getAllByText("Ada Lovelace")).toHaveLength(1);
-      expect(entries[0]).toHaveTextContent("Katherine Johnson");
+      expect(within(list).getAllByText("@KatherineJohnson")).toHaveLength(1);
+      expect(within(list).getAllByText("@AdaLovelace")).toHaveLength(1);
+      expect(entries[0]).toHaveTextContent("@KatherineJohnson");
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
