@@ -37,6 +37,26 @@ The ingestion runner classifies each payload as `accepted`, `invalid`, `duplicat
 
 Issue #4 adds a built-in Node HTTP server for reading public guestbook messages and streaming future accepted records over Server-Sent Events. The API exposes only public fields: `id`, `name`, `message`, `receivedAt`, and `storedAt`.
 
+## Starting the radio application
+
+Use the startup wrapper when you want one command with an explicit operating mode:
+
+```sh
+npm run build
+npm run start:radio -- --mode dev
+npm run start:radio -- --mode production
+```
+
+Development mode uses `data/guestbook.dev.sqlite3` and replays valid checked-in fixture messages into the running server so local API and live-update flows have sample data. The server still accepts normal traffic while it is running.
+
+Production mode uses `data/guestbook.sqlite3` by default, or `GUESTBOOK_DATABASE_PATH` when set, and does not load fixture data. It starts the real guestbook server and waits for configured real ingestion sources.
+
+Both modes pass additional options through to the server CLI:
+
+```sh
+npm run start:radio -- --mode production --host 0.0.0.0 --port 3000 --allowed-origin https://guestbook.example
+```
+
 Build the project, then start the server:
 
 ```sh
